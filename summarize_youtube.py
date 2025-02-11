@@ -2,6 +2,12 @@ import os
 from googleapiclient.discovery import build
 from pytube import YouTube
 import google.generativeai as genai
+# load dot .env file 
+from dotenv import load_dotenv
+load_dotenv()
+
+
+
 
 # Set up YouTube Data API
 #get api key from .env file
@@ -61,8 +67,16 @@ def get_video_transcript(video_id):
 def summarize_text(text):
     """Summarize the text using Gemini API."""
     try:
+        # Initialize the model
+        model = genai.GenerativeModel('gemini-pro')
+        
+        # Create the prompt
         prompt = f"Summarize the following text in three sentences:\n\n{text}"
-        response = genai.generate_text(prompt)
+        
+        # Generate the response
+        response = model.generate_content(prompt)
+        
+        # Return the generated text
         return response.text
     except Exception as e:
         print(f"Error summarizing text: {e}")
