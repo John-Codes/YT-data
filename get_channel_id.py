@@ -1,7 +1,13 @@
 from googleapiclient.discovery import build
+import os
+from dotenv import load_dotenv
+load_dotenv()
 
 # Set up YouTube Data API
-YOUTUBE_API_KEY = 'AIzaSyBbX-w7faqNZ8lO8QDlyADkucrymgqJP2w'  # User-provided YouTube API key
+# get youtube api key from .env file:
+YOUTUBE_API_KEY=os.getenv('YOUTUBE_API_KEY')
+
+
 youtube = build('youtube', 'v3', developerKey=YOUTUBE_API_KEY)
 
 def get_channel_id(handle):
