@@ -1,8 +1,13 @@
 import os
+import asyncio
+import re
+import httpx
 from googleapiclient.discovery import build
 from pytube import YouTube
-import google.generativeai as genai
 from dotenv import load_dotenv
+import time
+import random
+from youtube_transcript_api import YouTubeTranscriptApi
 
 load_dotenv()
 
@@ -13,7 +18,6 @@ CHANNEL_ID = os.getenv('CHANNEL_ID')
 
 # Gemini API setup
 GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
-genai.configure(api_key=GEMINI_API_KEY)
 
 def get_latest_videos(channel_id, max_results=5):
     """Fetch latest videos from YouTube channel."""
@@ -27,81 +31,69 @@ def get_latest_videos(channel_id, max_results=5):
     return request.execute()['items']
 
 def get_video_transcript(video_id):
-    """Extract transcript using best available method."""
-    # Pytube attempt
+    """Extract transcript using youtube_transcript_api."""
     try:
-        yt = YouTube(f'https://www.youtube.com/watch?v={video_id}')
-        caption = None
-        
-        # Try different caption tracks in priority order
-        for code in ['en', 'a.en', 'en-US', 'en-GB']:
-            if code in yt.captions:
-                caption = yt.captions[code]
-                break
-                
-        if not caption:
-            return None
-            
-        return caption.generate_srt_captions()
-    except Exception as e:
-        print(f"Pytube error for {video_id}: {e}")
-    
-    # Fallback to youtube_transcript_api
-    try:
-        from youtube_transcript_api import YouTubeTranscriptApi
         transcript = YouTubeTranscriptApi.get_transcript(video_id, languages=['en'])
         return " ".join(entry['text'] for entry in transcript)
     except Exception as e:
         print(f"Transcript API error for {video_id}: {e}")
         return None
 
-def summarize_text(text):
-    """Summarize text using Gemini API with rate limiting and retries."""
-    model = genai.GenerativeModel('gemini-pro')
+async def summarize_text(text):
+    """Summarize text using Ollama manager."""
+    from Ollama_manager import OllamaService
     max_retries = 3
-    retry_delay = 1  # seconds
+    retry_delay = random.randint(1, 3)
     
     for attempt in range(max_retries):
         try:
-            response = model.generate_content(
-                f"Summarize this YouTube video transcript in 3 bullet points:\n{text[:30000]}",
-                safety_settings={
-                    'HARM_CATEGORY_HARASSMENT': 'BLOCK_NONE',
-                    'HARM_CATEGORY_HATE_SPEECH': 'BLOCK_NONE',
-                    'HARM_CATEGORY_SEXUALLY_EXPLICIT': 'BLOCK_NONE',
-                    'HARM_CATEGORY_DANGEROUS_CONTENT': 'BLOCK_NONE'
-                }
-            )
-            
-            response.resolve()
-            
-            if response.prompt_feedback.block_reason:
-                print(f"Content blocked: {response.prompt_feedback.block_reason}")
-                return None
-                
-            return response.text.strip()
-            
+            ollama = OllamaService()
+            ollama.manual_start()
+            model = "deepseek-r1:32b"
+            ollama.load(model)
+            messages = [
+                {"role": "user", "content": f"Summarize this YouTube video transcript and cite the sources of the info be consice and use laymans terms also dont add comments or promotions.Summarize the video content by providing only key insights and updates related to market trends, economic developments, and financial news. Exclude any references to personal promotions, sponsored content, course advertisements, or unrelated discussions. Keep the summary concise and strictly relevant to the market analysis Do not use mark up or list just a plain text paragraph of sentences no lists :\n{text[:30000]}"}
+            ]
+            summary = ollama.get_full_response(model, messages)
+            summary = remove_think_tags(summary)
+            ollama.unload(model)
+            ollama.manual_stop()
+            return summary.strip()
         except Exception as e:
-            if 'quota' in str(e).lower() or 'exhausted' in str(e).lower():
-                print(f"API quota exceeded: {str(e)}")
-                return None
-                
-            print(f"API attempt {attempt + 1} failed: {str(e)}")
+            print(f"Ollama attempt {attempt + 1} failed: {str(e)}")
             if attempt < max_retries - 1:
-                time.sleep(retry_delay * (attempt + 1))
-            else:
-                print("Max retries reached. Could not summarize content.")
-                return None
+                await asyncio.sleep(retry_delay * (attempt + 1))
+    
+    print("Ollama failed to summarize the text.")
+    return None
 
-def main():
+@staticmethod
+def remove_think_tags(text):
+    # Define the pattern to match text between <think> and </think> tags
+    pattern = re.compile(r'<think>\n.*?\n</think>', re.DOTALL)
+
+    # Substitute the matched pattern with an empty string
+    result = pattern.sub('', text)
+
+    return result
+
+async def main():
+    print("Fetching latest videos...")
     videos = get_latest_videos(CHANNEL_ID)
+    print(f"Found {len(videos)} videos.")
     
     for video in videos:
         video_id = video['id']['videoId']
+        print(f"Processing video ID: {video_id}")
         if transcript := get_video_transcript(video_id):
-            if summary := summarize_text(transcript):
+            print(f"Transcript fetched for video ID: {video_id}")
+            if summary := await summarize_text(transcript):
                 print(f"\nTitle: {video['snippet']['title']}")
                 print(f"Summary:\n{summary}\n")
+            else:
+                print(f"Failed to summarize video ID: {video_id}")
+        else:
+            print(f"Failed to fetch transcript for video ID: {video_id}")
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

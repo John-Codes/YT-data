@@ -101,7 +101,8 @@ env/
 venv/
 ENV.bak/
 venv.bak/
-
+YT scriptter/
+scripter
 # Spyder project settings
 .spyderproject
 .spyproject
