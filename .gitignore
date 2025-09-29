@@ -143,3 +143,4 @@ dmypy.json
 #add dot env file to git ignore
 
 .env
+nohup.out
